@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  Workhorse Checklist Builder
+  ---------------------------
+  A single-file, mobile-first HTML tool for building on-screen checklist
+  graphics for short-form video (TikTok / YouTube Shorts / Instagram & FB
+  Reels). Built for the Workhorse AI & SEO YouTube channel.
+
+  - Vanilla JS, no build step, no dependencies (works fully offline).
+  - Optional Google Fonts (Anton / Inter) load lazily and only if selected.
+  - No localStorage — state lives in memory for the session only.
+  - Drop this file into a GitHub repo (rename to index.html for GitHub
+    Pages) and it works as-is.
+
+  How to use:
+  1. Fill in the Content section (title, subheading, checklist items, etc).
+  2. Style it in the Theme / Typography / Animation sections.
+  3. Pick a Safe Zone guide so your text won't sit under platform UI.
+  4. Tap "Record Mode" to hide the editor and go full-screen on your phone,
+     then start your phone's screen recorder and tap items to check them
+     off live as you narrate.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0A0A0F">
+<title>Workhorse Checklist Builder</title>
+<style>
+  :root{
+    --app-bg:#0A0A0F;
+    --app-panel:#14161B;
+    --app-panel-2:#1B1E24;
+    --app-border:#272B32;
+    --app-text:#EDEEF0;
+    --app-muted:#8A8F98;
+    --app-cyan:#50E3FF;
+    --app-amber:#FFAB40;
+    --app-danger:#FF6B6B;
+    --safe-tint: 255,171,64;
+  }
+
+  *,*::before,*::after{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--app-bg); color:var(--app-text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+    overscroll-behavior:none;
+  }
+  body.record-mode{ overflow:hidden; height:100dvh; }
+
+  button{ font:inherit; }
+  input,select{ font:inherit; color:inherit; }
+
+  ::selection{ background:var(--app-cyan); color:#04121a; }
+
+  a{ color:var(--app-cyan); }
+
+  /* ---------- App shell ---------- */
+  #app{ max-width:640px; margin:0 auto; padding:14px 14px 60px; }
+
+  .app-header{ display:flex; align-items:baseline; gap:10px; margin:4px 2px 14px; }
+  .app-header h1{
+    font-size:15px; font-weight:800; letter-spacing:.09em; text-transform:uppercase;
+    margin:0; color:var(--app-text);
+  }
+  .app-header span{ color:var(--app-cyan); }
+  .app-header small{ color:var(--app-muted); font-size:11px; letter-spacing:.03em; }
+
+  /* ---------- Stage (the actual checklist graphic) ---------- */
+  #stageWrap{
+    position:relative; margin:0 auto 12px; width:100%;
+    display:flex; justify-content:center;
+  }
+  #stage{
+    position:relative;
+    width:min(100%, calc(100dvh * 0.42)); /* keeps a sane size in the editor */
+    aspect-ratio:9/16;
+    max-height:78dvh;
+    border-radius:22px;
+    overflow:hidden;
+    background:var(--bg,#0A0A0F);
+    box-shadow:0 0 0 1px var(--app-border), 0 30px 60px -25px rgba(0,0,0,.7);
+    container-type:inline-size;
+    transition:border-radius .25s ease;
+  }
+  body.record-mode #stageWrap{
+    position:fixed; inset:0; margin:0; z-index:50; padding:0; display:block;
+  }
+  body.record-mode #stage{
+    width:100vw; height:100dvh; max-height:100dvh; aspect-ratio:auto;
+    border-radius:0; box-shadow:none;
+  }
+
+  @supports not (container-type: inline-size){
+    /* graceful fallback: approximate scaling from viewport width */
+    .cl-title{ font-size: calc(var(--title-pct,9) * 1vw) !important; }
+    .cl-sub{ font-size: calc(var(--body-pct,4.4) * 1.15vw) !important; }
+    .cl-item-main{ font-size: calc(var(--body-pct,4.4) * 1vw) !important; }
+    .cl-item-sub{ font-size: calc(var(--body-pct,4.4) * .75vw) !important; }
+    .cl-bottom{ font-size: calc(var(--body-pct,4.4) * 1.05vw) !important; }
+  }
+
+  .safe-area{
+    position:absolute;
+    top:9%; bottom:15%; left:6%; right:6%;
+    display:flex; flex-direction:column;
+    gap:var(--gap-sections, 3cqw);
+    justify-content:space-between;
+    color:var(--title-color,#fff);
+    transform:translate(var(--nudge-x,0%), var(--nudge-y,0%));
+  }
+  /* content position (vertical anchor) */
+  #stage[data-content-pos="top"] .safe-area{ justify-content:flex-start; }
+  #stage[data-content-pos="center"] .safe-area{ justify-content:center; }
+  #stage[data-content-pos="bottom"] .safe-area{ justify-content:flex-end; }
+  #stage[data-content-pos="top"] .cl-items,
+  #stage[data-content-pos="center"] .cl-items,
+  #stage[data-content-pos="bottom"] .cl-items{ flex:0 1 auto; }
+
+  .cl-header{ flex:none; }
+  .cl-title{
+    margin:0; font-family:var(--font-heading);
+    font-size:calc(var(--title-pct,9) * 1cqw);
+    line-height:1.05; color:var(--title-color);
+  }
+  .style-bold .cl-title{ font-weight:800; }
+  .style-bold .cl-item-main{ font-weight:800; }
+  .style-upper .cl-title{ text-transform:uppercase; letter-spacing:.01em; }
+  .style-italic .safe-area{ font-style:italic; }
+
+  /* per-section text alignment */
+  #stage[data-align-header="center"] .cl-header{ text-align:center; }
+  #stage[data-align-header="right"] .cl-header{ text-align:right; }
+  #stage[data-align-items="center"] .cl-item{ justify-content:center; }
+  #stage[data-align-items="center"] .cl-item-text{ text-align:center; }
+  #stage[data-align-items="right"] .cl-item{ justify-content:flex-end; }
+  #stage[data-align-items="right"] .cl-item-text{ text-align:right; }
+  #stage[data-align-bottom="center"] .cl-bottom{ text-align:center; }
+  #stage[data-align-bottom="right"] .cl-bottom{ text-align:right; }
+
+  .cl-sub{
+    margin:var(--gap-head, 0.6cqw) 0 0; font-family:var(--font-body);
+    font-size:calc(var(--body-pct,4.4) * 1.15cqw);
+    color:var(--sub-color); line-height:1.3;
+  }
+
+  .cl-items{
+    flex:1 1 auto; display:flex; flex-direction:column; justify-content:center;
+    gap:var(--gap-items, 4.2cqw); min-height:0;
+    width:var(--items-width, 100%); align-self:center;
+    border:var(--frame-w,0) solid var(--frame-color,transparent);
+    border-radius:var(--frame-radius,0);
+    padding:var(--frame-pad,0);
+    box-sizing:border-box;
+  }
+  .cl-item{
+    display:flex; align-items:flex-start; gap:3.2cqw; cursor:pointer;
+    user-select:none; -webkit-user-select:none;
+  }
+  .cl-item .checkbox{
+    flex:none; width:7.4cqw; height:7.4cqw; margin-top:.3cqw;
+    border-radius:22%; border:.55cqw solid var(--item-sub-color);
+    display:flex; align-items:center; justify-content:center;
+    background:transparent;
+    transition:background var(--dur,500ms) ease, border-color var(--dur,500ms) ease,
+               transform var(--dur,500ms) cubic-bezier(.34,1.56,.64,1);
+  }
+  .cl-item .check-icon{ width:70%; height:70%; overflow:visible; }
+  .cl-item .check-path{
+    fill:none; stroke:var(--accent); stroke-width:3.4;
+    stroke-linecap:round; stroke-linejoin:round;
+    stroke-dasharray:100; stroke-dashoffset:100;
+    transition:stroke-dashoffset var(--dur,500ms) ease, stroke var(--dur,500ms) ease,
+               opacity var(--dur,500ms) ease, transform var(--dur,500ms) ease;
+    opacity:0;
+  }
+
+  .cl-item-text{ flex:1 1 auto; min-width:0; }
+  .cl-item-main{
+    font-family:var(--font-body); font-weight:var(--item-weight,500);
+    font-size:calc(var(--body-pct,4.4) * 1cqw); color:var(--item-color);
+    position:relative; display:inline-block; line-height:1.25;
+    transition:color var(--dur,500ms) ease;
+  }
+  .cl-item-main::after{
+    content:""; position:absolute; left:0; right:0; top:52%; height:.16em;
+    background:currentColor; border-radius:2px;
+    transform:scaleX(0); transform-origin:left;
+    transition:transform var(--dur,500ms) ease;
+  }
+  .cl-item-sub{
+    margin-top:.5cqw; font-family:var(--font-body);
+    font-size:calc(var(--body-pct,4.4) * .72cqw); color:var(--item-sub-color); line-height:1.3;
+    transition:color var(--dur,500ms) ease, opacity var(--dur,500ms) ease;
+  }
+
+  .cl-bottom{
+    flex:none; margin:0; font-family:var(--font-body); font-weight:700;
+    font-size:calc(var(--body-pct,4.4) * 1.05cqw); color:var(--bottom-color);
+    line-height:1.3;
+  }
+
+  /* ---- checked-state transitions, keyed by animation style ---- */
+  #stage[data-strike="true"] .cl-item.checked .cl-item-main::after{ transform:scaleX(1); }
+  .cl-item.checked .cl-item-text{ opacity:.6; }
+
+  /* stroke: outlined box, checkmark draws in */
+  #stage[data-anim="stroke"] .cl-item.checked .checkbox{ border-color:var(--accent); }
+  #stage[data-anim="stroke"] .cl-item.checked .check-path{ stroke-dashoffset:0; opacity:1; }
+
+  /* pop: box fills solid, icon pops/scales in, bounce on the box */
+  #stage[data-anim="pop"] .checkbox{ transform:scale(1); }
+  #stage[data-anim="pop"] .cl-item.checked .checkbox{
+    background:var(--accent); border-color:var(--accent); transform:scale(1.08);
+  }
+  #stage[data-anim="pop"] .check-path{ stroke:var(--bg); stroke-dashoffset:0; transform:scale(.5); transform-origin:center; }
+  #stage[data-anim="pop"] .cl-item.checked .check-path{ opacity:1; transform:scale(1); }
+
+  /* slide: checkmark slides in from the left, box stays outlined */
+  #stage[data-anim="slide"] .check-path{ stroke-dashoffset:0; transform:translateX(-140%); }
+  #stage[data-anim="slide"] .cl-item.checked .checkbox{ border-color:var(--accent); }
+  #stage[data-anim="slide"] .cl-item.checked .check-path{ opacity:1; transform:translateX(0); }
+
+  /* ---------- safe zone overlay ---------- */
+  .safezone-overlay{ position:absolute; inset:0; pointer-events:none; z-index:5; }
+  .sz-band{
+    position:absolute; background:rgba(var(--safe-tint), .16);
+    border:1px dashed rgba(var(--safe-tint), .55);
+  }
+  .sz-label{
+    position:absolute; font-size:9px; font-weight:700; letter-spacing:.04em;
+    color:#fff; background:rgba(0,0,0,.55); padding:3px 6px; border-radius:5px;
+    text-transform:uppercase; white-space:nowrap;
+  }
+  body.record-mode .safezone-overlay{ display:none !important; }
+
+  /* ---------- toolbar under the stage ---------- */
+  #stageToolbar{
+    display:flex; gap:8px; justify-content:center; margin:2px 0 18px;
+  }
+  body.record-mode #stageToolbar{ display:none; }
+  body.record-mode #panel, body.record-mode .app-header, body.record-mode #app > p.hint{ display:none; }
+  .tbtn{
+    border:1px solid var(--app-border); background:var(--app-panel-2); color:var(--app-text);
+    padding:9px 16px; border-radius:999px; font-size:13px; font-weight:600;
+    cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+  }
+  .tbtn.primary{ background:var(--app-cyan); color:#04121a; border-color:var(--app-cyan); }
+  .tbtn:active{ transform:scale(.97); }
+
+  /* ---------- settings panel ---------- */
+  #panel{ display:flex; flex-direction:column; gap:10px; }
+  details{
+    background:var(--app-panel); border:1px solid var(--app-border); border-radius:14px;
+    overflow:hidden;
+  }
+  summary{
+    padding:13px 16px; cursor:pointer; font-weight:700; font-size:13.5px;
+    letter-spacing:.02em; list-style:none; display:flex; align-items:center;
+    justify-content:space-between; color:var(--app-text);
+  }
+  summary::-webkit-details-marker{ display:none; }
+  summary::after{
+    content:"+"; color:var(--app-muted); font-size:18px; font-weight:400; margin-left:8px;
+  }
+  details[open] summary::after{ content:"–"; }
+  .panel-body{ padding:2px 16px 16px; display:flex; flex-direction:column; gap:14px; }
+
+  .field label{
+    display:block; font-size:11.5px; font-weight:600; color:var(--app-muted);
+    text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;
+  }
+  .field input[type="text"], .field select{
+    width:100%; padding:10px 12px; border-radius:9px; border:1px solid var(--app-border);
+    background:var(--app-panel-2); color:var(--app-text); font-size:14px;
+  }
+  .field input[type="text"]:focus, .field select:focus, .field input[type="range"]:focus{
+    outline:2px solid var(--app-cyan); outline-offset:1px;
+  }
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .row3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+
+  .range-row{ display:flex; align-items:center; gap:10px; }
+  .range-row input[type="range"]{ flex:1; accent-color:var(--app-cyan); }
+  .range-row output{ font-size:12px; color:var(--app-muted); min-width:34px; text-align:right; }
+
+  .swatches{ display:flex; gap:8px; flex-wrap:wrap; }
+  .swatch{
+    display:flex; align-items:center; gap:8px; border:1px solid var(--app-border);
+    background:var(--app-panel-2); padding:8px 10px; border-radius:10px; cursor:pointer;
+    font-size:12.5px; font-weight:600;
+  }
+  .swatch.active{ outline:2px solid var(--app-cyan); }
+  .swatch .dots{ display:flex; }
+  .swatch .dots i{ width:12px; height:12px; border-radius:50%; display:inline-block; margin-left:-4px; border:1px solid rgba(255,255,255,.25); }
+  .swatch .dots i:first-child{ margin-left:0; }
+
+  .color-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+  .color-field{ display:flex; flex-direction:column; gap:5px; }
+  .color-field label{ margin:0; font-size:10.5px; color:var(--app-muted); text-transform:uppercase; letter-spacing:.04em; }
+  .cf-row{ display:flex; align-items:center; gap:6px; }
+  .color-field input[type="color"]{
+    width:36px; height:32px; flex:none; border:none; border-radius:8px; background:none; padding:0; cursor:pointer;
+  }
+  .hex-input{
+    flex:1; min-width:0; width:auto; padding:7px 8px; border-radius:7px; border:1px solid var(--app-border);
+    background:var(--app-bg); color:var(--app-text); font-family:"Courier New",monospace;
+    font-size:12.5px; text-transform:uppercase; letter-spacing:.03em;
+  }
+  .hex-input.invalid{ border-color:var(--app-danger); color:var(--app-danger); }
+
+  .fav-row{ display:flex; flex-wrap:wrap; gap:9px; min-height:34px; }
+  .fav-swatch{
+    position:relative; width:32px; height:32px; border-radius:9px;
+    border:1px solid var(--app-border); cursor:pointer;
+  }
+  .fav-swatch .rm{
+    position:absolute; top:-7px; right:-7px; width:16px; height:16px; border-radius:50%;
+    background:#000; color:#fff; font-size:9px; line-height:1; border:1px solid var(--app-border);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .fav-empty{ font-size:11.5px; color:var(--app-muted); align-self:center; }
+
+  .toggle-row{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{
+    border:1px solid var(--app-border); background:var(--app-panel-2); color:var(--app-muted);
+    padding:8px 13px; border-radius:999px; font-size:12.5px; font-weight:600; cursor:pointer;
+  }
+  .chip.on{ background:var(--app-cyan); color:#04121a; border-color:var(--app-cyan); }
+
+  .item-row{
+    border:1px solid var(--app-border); border-radius:10px; padding:10px; background:var(--app-panel-2);
+    display:flex; flex-direction:column; gap:8px; position:relative;
+  }
+  .item-row .item-top{ display:flex; gap:8px; align-items:center; }
+  .item-row input[type="text"]{ background:var(--app-bg); }
+  .item-actions{ display:flex; gap:6px; }
+  .icon-btn{
+    width:30px; height:30px; flex:none; border-radius:8px; border:1px solid var(--app-border);
+    background:var(--app-bg); color:var(--app-muted); cursor:pointer; font-size:13px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .icon-btn.danger{ color:var(--app-danger); }
+  #addItemBtn{
+    align-self:flex-start; background:var(--app-panel-2); border:1px dashed var(--app-border);
+    color:var(--app-cyan); border-radius:10px; padding:9px 14px; font-weight:700; font-size:13px; cursor:pointer;
+  }
+
+  .hint{ font-size:11.5px; color:var(--app-muted); line-height:1.5; margin:0; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition-duration:.01ms !important; animation-duration:.01ms !important; }
+  }
+
+  @media (min-width:760px){
+    #app{ max-width:900px; }
+    #stage{ width:min(360px, 40vw); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="app-header">
+    <h1><span>Workhorse</span> Checklist Builder</h1>
+    <small>for TikTok / Shorts / Reels</small>
+  </div>
+
+  <div id="stageWrap">
+    <div id="stage" data-anim="stroke" data-strike="true">
+      <div class="safezone-overlay" id="safezoneOverlay"></div>
+      <div class="safe-area" id="safeArea">
+        <div class="cl-header">
+          <h2 class="cl-title" id="clTitle"></h2>
+          <p class="cl-sub" id="clSub"></p>
+        </div>
+        <div class="cl-items" id="clItems"></div>
+        <p class="cl-bottom" id="clBottom"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="stageToolbar">
+    <button class="tbtn primary" id="recordBtn">🔴 Record Mode</button>
+    <button class="tbtn" id="resetBtn">↺ Reset checks</button>
+  </div>
+  <p class="hint" style="text-align:center;margin:-10px 0 18px;">In Record Mode: swipe up anywhere on the stage to exit back to settings (or press Esc on desktop).</p>
+
+  <form id="panel" onsubmit="return false;">
+
+    <details open>
+      <summary>Content</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label for="inTitle">Checklist title</label>
+          <input type="text" id="inTitle" maxlength="80">
+        </div>
+        <div class="field">
+          <label for="inSub">Subheading (optional)</label>
+          <input type="text" id="inSub" maxlength="90">
+        </div>
+
+        <div class="field">
+          <label>Checklist items</label>
+          <div id="itemsEditor" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <button type="button" id="addItemBtn">+ Add item</button>
+        </div>
+
+        <div class="field">
+          <label for="inBottom">Bottom phrase (optional)</label>
+          <input type="text" id="inBottom" maxlength="90" placeholder="e.g. Which one do you skip?">
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Theme &amp; colors</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label>Presets</label>
+          <div class="swatches" id="themeSwatches"></div>
+        </div>
+
+        <div class="field">
+          <label>Favorite colors</label>
+          <div class="fav-row" id="favRow"></div>
+          <button type="button" id="addFavBtn" class="chip" style="margin-top:4px;align-self:flex-start;">☆ Save selected field's color</button>
+          <p class="hint">Tap a color swatch or hex box below to select that field, then tap "Save." Tap a favorite to apply it to whichever field is selected. Favorites reset on page reload.</p>
+        </div>
+
+        <div class="field">
+          <label>Custom colors — swatch or type a hex code</label>
+          <div class="color-grid">
+            <div class="color-field">
+              <label>Background</label>
+              <div class="cf-row"><input type="color" id="colBg"><input type="text" class="hex-input" id="hexBg" maxlength="7"></div>
+            </div>
+            <div class="color-field">
+              <label>Title</label>
+              <div class="cf-row"><input type="color" id="colTitle"><input type="text" class="hex-input" id="hexTitle" maxlength="7"></div>
+            </div>
+            <div class="color-field">
+              <label>Subheading</label>
+              <div class="cf-row"><input type="color" id="colSub"><input type="text" class="hex-input" id="hexSub" maxlength="7"></div>
+            </div>
+            <div class="color-field">
+              <label>Body text</label>
+              <div class="cf-row"><input type="color" id="colItem"><input type="text" class="hex-input" id="hexItem" maxlength="7"></div>
+            </div>
+            <div class="color-field">
+              <label>Item subtext</label>
+              <div class="cf-row"><input type="color" id="colItemSub"><input type="text" class="hex-input" id="hexItemSub" maxlength="7"></div>
+            </div>
+            <div class="color-field">
+              <label>Check mark</label>
+              <div class="cf-row"><input type="color" id="colAccent"><input type="text" class="hex-input" id="hexAccent" maxlength="7"></div>
+            </div>
+            <div class="color-field">
+              <label>Bottom phrase</label>
+              <div class="cf-row"><input type="color" id="colBottom"><input type="text" class="hex-input" id="hexBottom" maxlength="7"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Typography</summary>
+      <div class="panel-body">
+        <div class="row2">
+          <div class="field">
+            <label for="fontHeading">Heading font</label>
+            <select id="fontHeading">
+              <option value="display">Bold Display</option>
+              <option value="system">System Sans</option>
+              <option value="serif">Serif</option>
+              <option value="mono">Monospace</option>
+              <option value="anton">Anton (brand, online)</option>
+              <option value="inter">Inter (brand, online)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fontBody">Body font</label>
+            <select id="fontBody">
+              <option value="system">System Sans</option>
+              <option value="serif">Serif</option>
+              <option value="display">Bold Display</option>
+              <option value="mono">Monospace</option>
+              <option value="inter">Inter (brand, online)</option>
+              <option value="anton">Anton (brand, online)</option>
+            </select>
+          </div>
+        </div>
+        <p class="hint">"Anton" and "Inter" load from Google Fonts the first time you pick them, so they need an internet connection. Everything else works fully offline.</p>
+
+        <div class="field">
+          <label>Title size</label>
+          <div class="range-row">
+            <input type="range" id="titlePct" min="5" max="14" step="0.5">
+            <output id="titlePctOut"></output>
+          </div>
+        </div>
+        <div class="field">
+          <label>Body size</label>
+          <div class="range-row">
+            <input type="range" id="bodyPct" min="2.5" max="6.5" step="0.1">
+            <output id="bodyPctOut"></output>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Style</label>
+          <div class="toggle-row">
+            <button type="button" class="chip" id="chipBold">Bold</button>
+            <button type="button" class="chip" id="chipItalic">Italic</button>
+            <button type="button" class="chip" id="chipUpper">Uppercase title</button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Position &amp; spacing</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label>Content position</label>
+          <div class="toggle-row" id="posChips">
+            <button type="button" class="chip" data-pos="spread">Spread (default)</button>
+            <button type="button" class="chip" data-pos="top">Top</button>
+            <button type="button" class="chip" data-pos="center">Center</button>
+            <button type="button" class="chip" data-pos="bottom">Bottom</button>
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>Nudge horizontal</label>
+            <div class="range-row">
+              <input type="range" id="nudgeX" min="-20" max="20" step="1">
+              <output id="nudgeXOut"></output>
+            </div>
+          </div>
+          <div class="field">
+            <label>Nudge vertical</label>
+            <div class="range-row">
+              <input type="range" id="nudgeY" min="-20" max="20" step="1">
+              <output id="nudgeYOut"></output>
+            </div>
+          </div>
+        </div>
+        <p class="hint">Nudging moves the whole content block (and the frame, if it's on) around the stage. Watch the safe-zone tint — if you nudge into it, that's your sign to pull back.</p>
+
+        <div class="field">
+          <label>Space between sections</label>
+          <div class="range-row">
+            <input type="range" id="gapSections" min="0" max="9" step="0.2">
+            <output id="gapSectionsOut"></output>
+          </div>
+        </div>
+        <div class="field">
+          <label>Space between checklist items</label>
+          <div class="range-row">
+            <input type="range" id="gapItems" min="1" max="10" step="0.2">
+            <output id="gapItemsOut"></output>
+          </div>
+        </div>
+        <div class="field">
+          <label>Space between title &amp; subheading</label>
+          <div class="range-row">
+            <input type="range" id="gapHead" min="0" max="5" step="0.2">
+            <output id="gapHeadOut"></output>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Checklist &amp; box width</label>
+          <div class="range-row">
+            <input type="range" id="itemsWidth" min="50" max="100" step="1">
+            <output id="itemsWidthOut"></output>
+          </div>
+          <p class="hint">Narrows just the checklist items (and the box around them, if it's on). Title and bottom phrase keep their own full width.</p>
+        </div>
+
+        <div class="row3">
+          <div class="field">
+            <label>Header align</label>
+            <select id="alignHeader">
+              <option value="left">Left</option>
+              <option value="center">Center</option>
+              <option value="right">Right</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Items align</label>
+            <select id="alignItems">
+              <option value="left">Left</option>
+              <option value="center">Center</option>
+              <option value="right">Right</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Bottom align</label>
+            <select id="alignBottom">
+              <option value="left">Left</option>
+              <option value="center">Center</option>
+              <option value="right">Right</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Checklist box 🔲</summary>
+      <div class="panel-body">
+        <p class="hint">Wraps a customizable, brand-colored box around just the checklist items (title and bottom phrase stay outside it).</p>
+        <div class="field">
+          <div class="toggle-row">
+            <button type="button" class="chip" id="chipFrame">Show box around items</button>
+          </div>
+        </div>
+        <div id="frameFields" style="display:none;flex-direction:column;gap:14px;">
+          <div class="field">
+            <label>Box color</label>
+            <div class="cf-row"><input type="color" id="colFrame"><input type="text" class="hex-input" id="hexFrame" maxlength="7"></div>
+          </div>
+          <div class="field">
+            <label>Border thickness</label>
+            <div class="range-row">
+              <input type="range" id="frameWidth" min="0.2" max="3" step="0.1">
+              <output id="frameWidthOut"></output>
+            </div>
+          </div>
+          <div class="field">
+            <label>Corner rounding</label>
+            <div class="range-row">
+              <input type="range" id="frameRadius" min="0" max="16" step="0.5">
+              <output id="frameRadiusOut"></output>
+            </div>
+          </div>
+          <div class="field">
+            <label>Inner padding</label>
+            <div class="range-row">
+              <input type="range" id="framePad" min="2" max="12" step="0.5">
+              <output id="framePadOut"></output>
+            </div>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Check animation</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label>Style</label>
+          <div class="toggle-row" id="animChips">
+            <button type="button" class="chip" data-anim="stroke">Stroke draw</button>
+            <button type="button" class="chip" data-anim="pop">Pop fill</button>
+            <button type="button" class="chip" data-anim="slide">Slide check</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Strikethrough on completed items</label>
+          <div class="toggle-row">
+            <button type="button" class="chip" id="chipStrike">Strikethrough</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Animation speed</label>
+          <div class="range-row">
+            <input type="range" id="durMs" min="150" max="1100" step="10">
+            <output id="durMsOut"></output>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Safe zones</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label>Guide for</label>
+          <select id="szPlatform">
+            <option value="universal">Universal (safe on all 3)</option>
+            <option value="tiktok">TikTok only</option>
+            <option value="shorts">YouTube Shorts only</option>
+            <option value="reels">Instagram / FB Reels only</option>
+            <option value="none">No guide</option>
+          </select>
+        </div>
+        <p class="hint">This is a visual reference only — your content's own position (set in "Position & spacing") doesn't move when you change this. Guides are approximate industry-standard margins, so give it a quick visual check before you publish. Guides never show in Record Mode or in the final recording.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Playback</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label>Mode</label>
+          <div class="toggle-row">
+            <button type="button" class="chip" id="modeManual">Tap to check</button>
+            <button type="button" class="chip" id="modeAuto">Auto-play</button>
+          </div>
+        </div>
+        <div class="field" id="autoDelayField" style="display:none;">
+          <label>Delay between items</label>
+          <div class="range-row">
+            <input type="range" id="autoDelay" min="0.4" max="4" step="0.1">
+            <output id="autoDelayOut"></output>
+          </div>
+          <div class="toggle-row" style="margin-top:8px;">
+            <button type="button" class="chip" id="autoStart">▶ Start</button>
+            <button type="button" class="chip" id="autoStop">■ Stop</button>
+          </div>
+        </div>
+        <p class="hint">In "Tap to check," tap any item on the stage (or in Record Mode, on your phone) to check it off live while you narrate. "Reset checks" clears every item back to unchecked.</p>
+      </div>
+    </details>
+
+  </form>
+
+  <p class="hint" style="text-align:center;margin-top:22px;">Workhorse AI &amp; SEO · single-file tool · no data leaves your device</p>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- state ---------------- */
+  const THEMES = {
+    workhorse: { label:"Workhorse Dark", bg:"#0A0A0F", title:"#F2F3F5", sub:"#7C8A93", item:"#F2F3F5", itemSub:"#7C8A93", accent:"#50E3FF", bottom:"#FFAB40" },
+    light:     { label:"Clean Light",    bg:"#FFFFFF", title:"#121417", sub:"#8A8F98", item:"#121417", itemSub:"#8A8F98", accent:"#2563EB", bottom:"#0EA5A5" },
+    contrast:  { label:"High Contrast",  bg:"#000000", title:"#FFFFFF", sub:"#9CA3AF", item:"#FFFFFF", itemSub:"#9CA3AF", accent:"#FFD400", bottom:"#FF3B30" }
+  };
+
+  const FONTS = {
+    system: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
+    serif:  'Georgia,"Times New Roman",serif',
+    display:'Impact,"Arial Black",sans-serif',
+    mono:   '"Courier New",Courier,monospace',
+    anton:  '"Anton",Impact,sans-serif',
+    inter:  '"Inter",-apple-system,sans-serif'
+  };
+
+  // approximate safe-zone margins, expressed as % of a 1080x1920 canvas
+  const SZ = {
+    tiktok: { top:7.8,  bottom:17.7, left:3.7, right:12.0, label:"TikTok" },
+    shorts: { top:9.4,  bottom:19.8, left:3.7, right:11.1, label:"YouTube Shorts" },
+    reels:  { top:7.8,  bottom:16.7, left:3.7, right:9.3,  label:"IG / FB Reels" }
+  };
+  SZ.universal = {
+    top: Math.max(SZ.tiktok.top, SZ.shorts.top, SZ.reels.top),
+    bottom: Math.max(SZ.tiktok.bottom, SZ.shorts.bottom, SZ.reels.bottom),
+    left: Math.max(SZ.tiktok.left, SZ.shorts.left, SZ.reels.left),
+    right: Math.max(SZ.tiktok.right, SZ.shorts.right, SZ.reels.right),
+    label: "Universal (all platforms)"
+  };
+
+  let state = {
+    title: "Attic Safety Checklist",
+    sub: "Before you send a tech up top",
+    bottom: "Which one do you skip? 👇",
+    items: [
+      { main:"Check attic temp before entering", sub:"120°F+ means suit up and hydrate first", checked:false },
+      { main:"Bring a hydration pack", sub:"", checked:false },
+      { main:"Set a 15-minute check-in timer", sub:"", checked:false },
+      { main:"Keep a cooling towel on hand", sub:"", checked:false }
+    ],
+    theme:"workhorse",
+    colors: Object.assign({}, THEMES.workhorse),
+    fontHeading:"display",
+    fontBody:"system",
+    titlePct:9, bodyPct:4.4,
+    bold:true, italic:false, uppercase:true,
+    anim:"stroke", strike:true, dur:500,
+    szPlatform:"universal",
+    playbackMode:"manual", autoDelay:1.4,
+    contentPos:"spread", nudgeX:0, nudgeY:0,
+    gapSections:3, gapItems:4.2, gapHead:0.6, itemsWidth:100,
+    alignHeader:"left", alignItems:"left", alignBottom:"left",
+    frameOn:false, frameColor: THEMES.workhorse.accent,
+    frameWidth:0.8, frameRadius:6, framePad:6
+  };
+
+  let fontsLoaded = false;
+  let autoTimer = null;
+
+  /* ---------------- element refs ---------------- */
+  const stage = document.getElementById("stage");
+  const safeArea = document.getElementById("safeArea");
+  const clTitle = document.getElementById("clTitle");
+  const clSub = document.getElementById("clSub");
+  const clItems = document.getElementById("clItems");
+  const clBottom = document.getElementById("clBottom");
+  const szOverlay = document.getElementById("safezoneOverlay");
+
+  /* ---------------- rendering ---------------- */
+  function renderContent(){
+    clTitle.textContent = state.title;
+    clSub.textContent = state.sub;
+    clSub.style.display = state.sub.trim() ? "" : "none";
+    clBottom.textContent = state.bottom;
+    clBottom.style.display = state.bottom.trim() ? "" : "none";
+
+    clItems.innerHTML = "";
+    state.items.forEach((item, i) => {
+      const row = document.createElement("div");
+      row.className = "cl-item" + (item.checked ? " checked" : "");
+      row.dataset.index = i;
+      row.innerHTML =
+        '<div class="checkbox"><svg class="check-icon" viewBox="0 0 24 24">' +
+        '<path class="check-path" pathLength="100" d="M4 12.5l5 5L20 6"/></svg></div>' +
+        '<div class="cl-item-text">' +
+          '<span class="cl-item-main"></span>' +
+          (item.sub.trim() ? '<div class="cl-item-sub"></div>' : '') +
+        '</div>';
+      row.querySelector(".cl-item-main").textContent = item.main;
+      if (item.sub.trim()) row.querySelector(".cl-item-sub").textContent = item.sub;
+      row.addEventListener("click", () => toggleItem(i));
+      clItems.appendChild(row);
+    });
+  }
+
+  function toggleItem(i){
+    state.items[i].checked = !state.items[i].checked;
+    const row = clItems.querySelector('.cl-item[data-index="' + i + '"]');
+    if (row) row.classList.toggle("checked", state.items[i].checked);
+  }
+
+  function resetChecks(){
+    stopAutoplay();
+    state.items.forEach(it => it.checked = false);
+    clItems.querySelectorAll(".cl-item").forEach(r => r.classList.remove("checked"));
+  }
+
+  function applyColors(){
+    const c = state.colors;
+    stage.style.setProperty("--bg", c.bg);
+    stage.style.setProperty("--title-color", c.title);
+    stage.style.setProperty("--sub-color", c.sub);
+    stage.style.setProperty("--item-color", c.item);
+    stage.style.setProperty("--item-sub-color", c.itemSub);
+    stage.style.setProperty("--accent", c.accent);
+    stage.style.setProperty("--bottom-color", c.bottom);
+  }
+
+  function ensureFontsLoaded(){
+    if (fontsLoaded) return;
+    fontsLoaded = true;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }
+
+  function applyTypography(){
+    if (state.fontHeading === "anton" || state.fontHeading === "inter" ||
+        state.fontBody === "anton" || state.fontBody === "inter"){
+      ensureFontsLoaded();
+    }
+    stage.style.setProperty("--font-heading", FONTS[state.fontHeading]);
+    stage.style.setProperty("--font-body", FONTS[state.fontBody]);
+    stage.style.setProperty("--title-pct", state.titlePct);
+    stage.style.setProperty("--body-pct", state.bodyPct);
+    document.getElementById("titlePctOut").textContent = state.titlePct + "%";
+    document.getElementById("bodyPctOut").textContent = state.bodyPct + "%";
+
+    stage.classList.toggle("style-bold", state.bold);
+    stage.classList.toggle("style-italic", state.italic);
+    stage.classList.toggle("style-upper", state.uppercase);
+  }
+
+  function applyAnim(){
+    stage.dataset.anim = state.anim;
+    stage.dataset.strike = state.strike ? "true" : "false";
+    stage.style.setProperty("--dur", state.dur + "ms");
+    document.getElementById("durMsOut").textContent = state.dur + "ms";
+
+    document.querySelectorAll("#animChips .chip").forEach(b=>{
+      b.classList.toggle("on", b.dataset.anim === state.anim);
+    });
+    document.getElementById("chipStrike").classList.toggle("on", state.strike);
+  }
+
+  function applyLayout(){
+    // position (anchor + nudge)
+    stage.dataset.contentPos = state.contentPos;
+    stage.style.setProperty("--nudge-x", state.nudgeX + "%");
+    stage.style.setProperty("--nudge-y", state.nudgeY + "%");
+    document.getElementById("nudgeXOut").textContent = state.nudgeX + "%";
+    document.getElementById("nudgeYOut").textContent = state.nudgeY + "%";
+    document.querySelectorAll("#posChips .chip").forEach(b=>{
+      b.classList.toggle("on", b.dataset.pos === state.contentPos);
+    });
+
+    // spacing
+    stage.style.setProperty("--gap-sections", state.gapSections + "cqw");
+    stage.style.setProperty("--gap-items", state.gapItems + "cqw");
+    stage.style.setProperty("--gap-head", state.gapHead + "cqw");
+    document.getElementById("gapSectionsOut").textContent = state.gapSections + "cqw";
+    document.getElementById("gapItemsOut").textContent = state.gapItems + "cqw";
+    document.getElementById("gapHeadOut").textContent = state.gapHead + "cqw";
+
+    // checklist/box width
+    stage.style.setProperty("--items-width", state.itemsWidth + "%");
+    document.getElementById("itemsWidthOut").textContent = state.itemsWidth + "%";
+
+    // alignment
+    stage.dataset.alignHeader = state.alignHeader;
+    stage.dataset.alignItems = state.alignItems;
+    stage.dataset.alignBottom = state.alignBottom;
+
+    // frame (brand color box)
+    stage.style.setProperty("--frame-w", state.frameOn ? state.frameWidth + "cqw" : "0");
+    stage.style.setProperty("--frame-color", state.frameColor);
+    stage.style.setProperty("--frame-radius", state.frameOn ? state.frameRadius + "cqw" : "0");
+    stage.style.setProperty("--frame-pad", state.frameOn ? state.framePad + "cqw" : "0");
+    document.getElementById("chipFrame").classList.toggle("on", state.frameOn);
+    document.getElementById("frameFields").style.display = state.frameOn ? "flex" : "none";
+    document.getElementById("frameWidthOut").textContent = state.frameWidth + "cqw";
+    document.getElementById("frameRadiusOut").textContent = state.frameRadius + "cqw";
+    document.getElementById("framePadOut").textContent = state.framePad + "cqw";
+  }
+
+  function renderSafezone(){
+    szOverlay.innerHTML = "";
+    if (state.szPlatform === "none") return;
+    const z = SZ[state.szPlatform];
+    const bands = [
+      { style:"top:0;left:0;right:0;height:" + z.top + "%;" },
+      { style:"bottom:0;left:0;right:0;height:" + z.bottom + "%;" },
+      { style:"top:0;bottom:0;left:0;width:" + z.left + "%;" },
+      { style:"top:0;bottom:0;right:0;width:" + z.right + "%;" }
+    ];
+    bands.forEach(b=>{
+      const d = document.createElement("div");
+      d.className = "sz-band";
+      d.setAttribute("style", b.style);
+      szOverlay.appendChild(d);
+    });
+    const label = document.createElement("div");
+    label.className = "sz-label";
+    label.style.top = "6px"; label.style.left = "50%"; label.style.transform="translateX(-50%)";
+    label.textContent = z.label;
+    szOverlay.appendChild(label);
+  }
+
+  /* ---------------- items editor (the form list) ---------------- */
+  const itemsEditor = document.getElementById("itemsEditor");
+  function renderItemsEditor(){
+    itemsEditor.innerHTML = "";
+    state.items.forEach((item, i) => {
+      const row = document.createElement("div");
+      row.className = "item-row";
+      row.innerHTML =
+        '<div class="item-top">' +
+          '<input type="text" placeholder="Item ' + (i+1) + ' text" value="" data-role="main" maxlength="70">' +
+          '<div class="item-actions">' +
+            '<button type="button" class="icon-btn" data-act="up" title="Move up">↑</button>' +
+            '<button type="button" class="icon-btn" data-act="down" title="Move down">↓</button>' +
+            '<button type="button" class="icon-btn danger" data-act="del" title="Remove">✕</button>' +
+          '</div>' +
+        '</div>' +
+        '<input type="text" placeholder="Subtext (optional)" value="" data-role="sub" maxlength="90">';
+      row.querySelector('[data-role="main"]').value = item.main;
+      row.querySelector('[data-role="sub"]').value = item.sub;
+
+      row.querySelector('[data-role="main"]').addEventListener("input", e=>{
+        state.items[i].main = e.target.value; renderContent();
+      });
+      row.querySelector('[data-role="sub"]').addEventListener("input", e=>{
+        state.items[i].sub = e.target.value; renderContent();
+      });
+      row.querySelector('[data-act="del"]').addEventListener("click", ()=>{
+        state.items.splice(i,1); renderItemsEditor(); renderContent();
+      });
+      row.querySelector('[data-act="up"]').addEventListener("click", ()=>{
+        if (i===0) return;
+        [state.items[i-1], state.items[i]] = [state.items[i], state.items[i-1]];
+        renderItemsEditor(); renderContent();
+      });
+      row.querySelector('[data-act="down"]').addEventListener("click", ()=>{
+        if (i===state.items.length-1) return;
+        [state.items[i+1], state.items[i]] = [state.items[i], state.items[i+1]];
+        renderItemsEditor(); renderContent();
+      });
+      itemsEditor.appendChild(row);
+    });
+  }
+  document.getElementById("addItemBtn").addEventListener("click", ()=>{
+    state.items.push({ main:"New item", sub:"", checked:false });
+    renderItemsEditor(); renderContent();
+  });
+
+  /* ---------------- content field bindings ---------------- */
+  const inTitle = document.getElementById("inTitle");
+  const inSub = document.getElementById("inSub");
+  const inBottom = document.getElementById("inBottom");
+  inTitle.value = state.title; inSub.value = state.sub; inBottom.value = state.bottom;
+  inTitle.addEventListener("input", e=>{ state.title = e.target.value; renderContent(); });
+  inSub.addEventListener("input", e=>{ state.sub = e.target.value; renderContent(); });
+  inBottom.addEventListener("input", e=>{ state.bottom = e.target.value; renderContent(); });
+
+  /* ---------------- theme swatches ---------------- */
+  const themeSwatches = document.getElementById("themeSwatches");
+  function renderSwatches(){
+    themeSwatches.innerHTML = "";
+    Object.keys(THEMES).forEach(key=>{
+      const t = THEMES[key];
+      const el = document.createElement("div");
+      el.className = "swatch" + (state.theme===key ? " active" : "");
+      el.innerHTML = '<span class="dots"><i style="background:'+t.bg+'"></i><i style="background:'+t.accent+'"></i><i style="background:'+t.bottom+'"></i></span><span>'+t.label+'</span>';
+      el.addEventListener("click", ()=>{
+        state.theme = key;
+        state.colors = Object.assign({}, t);
+        state.frameColor = t.accent;
+        syncColorPickers();
+        applyColors();
+        applyLayout();
+        renderSwatches();
+      });
+      themeSwatches.appendChild(el);
+    });
+  }
+
+  /* ---------------- color field helper: swatch + hex, shared across the whole tool ---------------- */
+  function isValidHex(v){ return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(v); }
+  function expandHex(v){
+    let h = v.replace("#","");
+    if (h.length === 3) h = h.split("").map(c=>c+c).join("");
+    return "#" + h.toLowerCase();
+  }
+
+  let activeColorField = null;
+
+  function bindColorField(colorEl, hexEl, onChange){
+    const field = {
+      colorEl, hexEl,
+      apply(hex){
+        colorEl.value = hex;
+        hexEl.value = hex.toUpperCase();
+        hexEl.classList.remove("invalid");
+        onChange(hex);
+      }
+    };
+    hexEl.value = colorEl.value.toUpperCase();
+    colorEl.addEventListener("input", ()=>{ field.apply(colorEl.value); });
+    hexEl.addEventListener("input", ()=>{
+      let v = hexEl.value.trim();
+      if (v && v[0] !== "#") v = "#" + v;
+      if (isValidHex(v)) field.apply(expandHex(v));
+      else hexEl.classList.add("invalid");
+    });
+    hexEl.addEventListener("blur", ()=>{ hexEl.value = colorEl.value.toUpperCase(); hexEl.classList.remove("invalid"); });
+    const setActive = ()=>{ activeColorField = field; };
+    colorEl.addEventListener("focus", setActive);
+    colorEl.addEventListener("click", setActive);
+    hexEl.addEventListener("focus", setActive);
+    return field;
+  }
+
+  const colorFields = {};
+  [
+    ["bg","colBg","hexBg"], ["title","colTitle","hexTitle"], ["sub","colSub","hexSub"],
+    ["item","colItem","hexItem"], ["itemSub","colItemSub","hexItemSub"],
+    ["accent","colAccent","hexAccent"], ["bottom","colBottom","hexBottom"]
+  ].forEach(([key,colorId,hexId])=>{
+    colorFields[key] = bindColorField(
+      document.getElementById(colorId), document.getElementById(hexId),
+      hex => { state.colors[key] = hex; applyColors(); }
+    );
+  });
+  activeColorField = colorFields.bg;
+
+  function syncColorPickers(){
+    Object.keys(colorFields).forEach(key=>{
+      colorFields[key].colorEl.value = state.colors[key];
+      colorFields[key].hexEl.value = state.colors[key].toUpperCase();
+    });
+  }
+
+  /* ---------------- favorite colors ---------------- */
+  let favorites = ["#50E3FF","#FFAB40","#FFFFFF","#000000"];
+  const favRow = document.getElementById("favRow");
+  function renderFavorites(){
+    favRow.innerHTML = "";
+    if (favorites.length === 0){
+      const p = document.createElement("span");
+      p.className = "fav-empty";
+      p.textContent = "No favorites yet — pick a color, then tap Save.";
+      favRow.appendChild(p);
+      return;
+    }
+    favorites.forEach((hex,i)=>{
+      const sw = document.createElement("div");
+      sw.className = "fav-swatch";
+      sw.style.background = hex;
+      sw.title = hex.toUpperCase();
+      sw.addEventListener("click", ()=>{ if (activeColorField) activeColorField.apply(hex); });
+      const rm = document.createElement("div");
+      rm.className = "rm";
+      rm.textContent = "✕";
+      rm.addEventListener("click", e=>{ e.stopPropagation(); favorites.splice(i,1); renderFavorites(); });
+      sw.appendChild(rm);
+      favRow.appendChild(sw);
+    });
+  }
+  document.getElementById("addFavBtn").addEventListener("click", ()=>{
+    if (!activeColorField) return;
+    const hex = activeColorField.colorEl.value.toLowerCase();
+    if (!favorites.some(f => f.toLowerCase() === hex)){
+      favorites.push(hex);
+      renderFavorites();
+    }
+  });
+
+  /* ---------------- typography bindings ---------------- */
+  const fontHeadingSel = document.getElementById("fontHeading");
+  const fontBodySel = document.getElementById("fontBody");
+  fontHeadingSel.value = state.fontHeading; fontBodySel.value = state.fontBody;
+  fontHeadingSel.addEventListener("change", e=>{ state.fontHeading = e.target.value; applyTypography(); });
+  fontBodySel.addEventListener("change", e=>{ state.fontBody = e.target.value; applyTypography(); });
+
+  const titlePctInput = document.getElementById("titlePct");
+  const bodyPctInput = document.getElementById("bodyPct");
+  titlePctInput.value = state.titlePct; bodyPctInput.value = state.bodyPct;
+  titlePctInput.addEventListener("input", e=>{ state.titlePct = parseFloat(e.target.value); applyTypography(); });
+  bodyPctInput.addEventListener("input", e=>{ state.bodyPct = parseFloat(e.target.value); applyTypography(); });
+
+  function bindChip(id, key){
+    const el = document.getElementById(id);
+    el.classList.toggle("on", state[key]);
+    el.addEventListener("click", ()=>{ state[key] = !state[key]; applyTypography(); el.classList.toggle("on", state[key]); });
+  }
+  bindChip("chipBold","bold");
+  bindChip("chipItalic","italic");
+  bindChip("chipUpper","uppercase");
+
+  /* ---------------- position & spacing bindings ---------------- */
+  document.querySelectorAll("#posChips .chip").forEach(b=>{
+    b.addEventListener("click", ()=>{ state.contentPos = b.dataset.pos; applyLayout(); });
+  });
+
+  const nudgeXInput = document.getElementById("nudgeX");
+  const nudgeYInput = document.getElementById("nudgeY");
+  nudgeXInput.value = state.nudgeX; nudgeYInput.value = state.nudgeY;
+  nudgeXInput.addEventListener("input", e=>{ state.nudgeX = parseFloat(e.target.value); applyLayout(); });
+  nudgeYInput.addEventListener("input", e=>{ state.nudgeY = parseFloat(e.target.value); applyLayout(); });
+
+  const gapSectionsInput = document.getElementById("gapSections");
+  const gapItemsInput = document.getElementById("gapItems");
+  const gapHeadInput = document.getElementById("gapHead");
+  gapSectionsInput.value = state.gapSections;
+  gapItemsInput.value = state.gapItems;
+  gapHeadInput.value = state.gapHead;
+  gapSectionsInput.addEventListener("input", e=>{ state.gapSections = parseFloat(e.target.value); applyLayout(); });
+  gapItemsInput.addEventListener("input", e=>{ state.gapItems = parseFloat(e.target.value); applyLayout(); });
+  gapHeadInput.addEventListener("input", e=>{ state.gapHead = parseFloat(e.target.value); applyLayout(); });
+
+  const itemsWidthInput = document.getElementById("itemsWidth");
+  itemsWidthInput.value = state.itemsWidth;
+  itemsWidthInput.addEventListener("input", e=>{ state.itemsWidth = parseFloat(e.target.value); applyLayout(); });
+
+  const alignHeaderSel = document.getElementById("alignHeader");
+  const alignItemsSel = document.getElementById("alignItems");
+  const alignBottomSel = document.getElementById("alignBottom");
+  alignHeaderSel.value = state.alignHeader;
+  alignItemsSel.value = state.alignItems;
+  alignBottomSel.value = state.alignBottom;
+  alignHeaderSel.addEventListener("change", e=>{ state.alignHeader = e.target.value; applyLayout(); });
+  alignItemsSel.addEventListener("change", e=>{ state.alignItems = e.target.value; applyLayout(); });
+  alignBottomSel.addEventListener("change", e=>{ state.alignBottom = e.target.value; applyLayout(); });
+
+  /* ---------------- brand color box (frame) bindings ---------------- */
+  document.getElementById("chipFrame").addEventListener("click", ()=>{
+    state.frameOn = !state.frameOn; applyLayout();
+  });
+  const frameColorField = bindColorField(
+    document.getElementById("colFrame"), document.getElementById("hexFrame"),
+    hex => { state.frameColor = hex; applyLayout(); }
+  );
+  frameColorField.apply(state.frameColor);
+
+  const frameWidthInput = document.getElementById("frameWidth");
+  const frameRadiusInput = document.getElementById("frameRadius");
+  const framePadInput = document.getElementById("framePad");
+  frameWidthInput.value = state.frameWidth;
+  frameRadiusInput.value = state.frameRadius;
+  framePadInput.value = state.framePad;
+  frameWidthInput.addEventListener("input", e=>{ state.frameWidth = parseFloat(e.target.value); applyLayout(); });
+  frameRadiusInput.addEventListener("input", e=>{ state.frameRadius = parseFloat(e.target.value); applyLayout(); });
+  framePadInput.addEventListener("input", e=>{ state.framePad = parseFloat(e.target.value); applyLayout(); });
+
+  /* ---------------- animation bindings ---------------- */
+  document.querySelectorAll("#animChips .chip").forEach(b=>{
+    b.addEventListener("click", ()=>{ state.anim = b.dataset.anim; applyAnim(); });
+  });
+  document.getElementById("chipStrike").addEventListener("click", ()=>{
+    state.strike = !state.strike; applyAnim();
+  });
+  const durInput = document.getElementById("durMs");
+  durInput.value = state.dur;
+  durInput.addEventListener("input", e=>{ state.dur = parseInt(e.target.value,10); applyAnim(); });
+
+  /* ---------------- safe zone bindings ---------------- */
+  const szSel = document.getElementById("szPlatform");
+  szSel.value = state.szPlatform;
+  szSel.addEventListener("change", e=>{ state.szPlatform = e.target.value; renderSafezone(); });
+
+  /* ---------------- playback bindings ---------------- */
+  const modeManualBtn = document.getElementById("modeManual");
+  const modeAutoBtn = document.getElementById("modeAuto");
+  const autoDelayField = document.getElementById("autoDelayField");
+  const autoDelayInput = document.getElementById("autoDelay");
+  autoDelayInput.value = state.autoDelay;
+  document.getElementById("autoDelayOut").textContent = state.autoDelay + "s";
+
+  function setPlaybackMode(mode){
+    state.playbackMode = mode;
+    modeManualBtn.classList.toggle("on", mode==="manual");
+    modeAutoBtn.classList.toggle("on", mode==="auto");
+    autoDelayField.style.display = mode==="auto" ? "" : "none";
+    if (mode==="manual") stopAutoplay();
+  }
+  modeManualBtn.addEventListener("click", ()=>setPlaybackMode("manual"));
+  modeAutoBtn.addEventListener("click", ()=>setPlaybackMode("auto"));
+  autoDelayInput.addEventListener("input", e=>{
+    state.autoDelay = parseFloat(e.target.value);
+    document.getElementById("autoDelayOut").textContent = state.autoDelay + "s";
+  });
+
+  function startAutoplay(){
+    stopAutoplay();
+    resetChecks();
+    let i = 0;
+    autoTimer = setInterval(()=>{
+      if (i >= state.items.length){ stopAutoplay(); return; }
+      toggleItem(i); i++;
+    }, state.autoDelay*1000);
+  }
+  function stopAutoplay(){ if (autoTimer){ clearInterval(autoTimer); autoTimer = null; } }
+  document.getElementById("autoStart").addEventListener("click", startAutoplay);
+  document.getElementById("autoStop").addEventListener("click", stopAutoplay);
+
+  /* ---------------- toolbar: record mode + reset ---------------- */
+  document.getElementById("resetBtn").addEventListener("click", resetChecks);
+
+  const recordBtn = document.getElementById("recordBtn");
+
+  function enterRecordMode(){
+    document.body.classList.add("record-mode");
+    if (document.documentElement.requestFullscreen){
+      document.documentElement.requestFullscreen().catch(()=>{});
+    }
+  }
+  function exitRecordMode(){
+    document.body.classList.remove("record-mode");
+    if (document.fullscreenElement && document.exitFullscreen){
+      document.exitFullscreen().catch(()=>{});
+    }
+  }
+  recordBtn.addEventListener("click", enterRecordMode);
+  document.addEventListener("keydown", e=>{ if (e.key === "Escape") exitRecordMode(); });
+
+  // swipe up anywhere to exit Record Mode (no on-screen button needed)
+  let touchStartY = null;
+  document.addEventListener("touchstart", e=>{
+    if (!document.body.classList.contains("record-mode")) { touchStartY = null; return; }
+    touchStartY = e.touches[0].clientY;
+  }, { passive:true });
+  document.addEventListener("touchend", e=>{
+    if (touchStartY === null) return;
+    const endY = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientY : touchStartY;
+    const deltaY = touchStartY - endY; // positive = swiped upward
+    if (document.body.classList.contains("record-mode") && deltaY > 70){
+      e.preventDefault();
+      exitRecordMode();
+    }
+    touchStartY = null;
+  }, { passive:false });
+
+  /* ---------------- init ---------------- */
+  renderSwatches();
+  syncColorPickers();
+  renderFavorites();
+  applyColors();
+  applyTypography();
+  applyAnim();
+  applyLayout();
+  renderSafezone();
+  renderItemsEditor();
+  renderContent();
+  setPlaybackMode("manual");
+})();
+</script>
+</body>
+</html>
